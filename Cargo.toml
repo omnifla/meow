@@ -1,0 +1,23 @@
+[package]
+name = "meow"
+version = "0.1.0"
+edition = "2021"
+description = "Declarative, reactive UI framework for editors, apps and in-game UI"
+license = "MIT"
+
+[features]
+default = []
+wgpu = ["dep:wgpu"]
+winit = ["dep:winit"]
+a11y = []
+
+[dependencies]
+wgpu = { version = "30", optional = true }
+winit = { version = "0.30", optional = true }
+
+[dev-dependencies]
+pollster = "0.4"
+
+[[example]]
+name = "hello_window"
+required-features = ["wgpu", "winit"]
