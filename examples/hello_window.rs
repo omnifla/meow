@@ -1,8 +1,13 @@
 use meow::base::Size;
+use meow::reactive::Signal;
 use meow::style::Color;
 use meow::widgets::{Button, ButtonStyle, Flex, Panel, Slot, Text};
 
+const WHITE: Color = Color::rgba(1.0, 1.0, 1.0, 1.0);
+
 fn build_ui() -> Flex {
+    let count = Signal::new(0u32);
+
     let style = ButtonStyle {
         normal: Color::rgba(0.35, 0.6, 1.0, 1.0),
         hovered: Color::rgba(0.5, 0.72, 1.0, 1.0),
@@ -15,8 +20,15 @@ fn build_ui() -> Flex {
         },
         style,
     )
-    .label(Text::new("Click", 16.0, Color::rgba(1.0, 1.0, 1.0, 1.0)))
-    .on_click(|| println!("clicked"));
+    .label(Text::new("Click", 16.0, WHITE))
+    .on_click({
+        let count = count.clone();
+        move || count.update(|n| *n += 1)
+    });
+
+    let counter = Text::bind(24.0, WHITE, move || {
+        format!("Clicked {} times", count.get())
+    });
 
     Flex::column()
         .padding(16.0)
@@ -28,11 +40,7 @@ fn build_ui() -> Flex {
             },
             color: Color::rgba(1.0, 0.45, 0.7, 1.0),
         })
-        .child(Text::new(
-            "Hello from meow",
-            24.0,
-            Color::rgba(1.0, 1.0, 1.0, 1.0),
-        ))
+        .child(counter)
         .child(
             Flex::row()
                 .gap(12.0)

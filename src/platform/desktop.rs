@@ -6,6 +6,7 @@ use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::window::{Window, WindowId};
 
 use crate::base::{Event, Point, Rect, Widget};
+use crate::reactive;
 use crate::render::WgpuRenderer;
 use crate::style::Color;
 
@@ -84,7 +85,9 @@ impl Gpu {
 
     fn handle(&mut self, event: Event) {
         let bounds = self.bounds();
-        if self.ui.event(bounds, &event) {
+        let changed = self.ui.event(bounds, &event);
+        let dirty = reactive::take_dirty();
+        if changed || dirty {
             self.window.request_redraw();
         }
     }
