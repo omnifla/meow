@@ -13,14 +13,22 @@ fn build_ui() -> Flex {
         hovered: Color::rgba(0.5, 0.72, 1.0, 1.0),
         pressed: Color::rgba(0.2, 0.4, 0.8, 1.0),
     };
-    let button = Button::new(Size { width: 80.0, height: 80.0 }, style)
-        .label(Text::new("Click", 16.0, WHITE))
-        .on_click({
-            let count = count.clone();
-            move || count.update(|n| *n += 1)
-        });
+    let button = Button::new(
+        Size {
+            width: 80.0,
+            height: 80.0,
+        },
+        style,
+    )
+    .label(Text::new("Click", 16.0, WHITE))
+    .on_click({
+        let count = count.clone();
+        move || count.update(|n| *n += 1)
+    });
 
-    let counter = Text::bind(24.0, WHITE, move || format!("Clicked {} times", count.get()));
+    let counter = Text::bind(24.0, WHITE, move || {
+        format!("Clicked {} times", count.get())
+    });
 
     Flex::column()
         .padding(16.0)
@@ -37,6 +45,25 @@ fn build_ui() -> Flex {
                 WHITE,
             )
             .wrap(),
+        )
+                .child(
+            Flex::row()
+                .gap(12.0)
+                .child(Panel {
+                    size: Size { width: 40.0, height: 40.0 },
+                    color: Color::rgba(0.7, 0.5, 1.0, 1.0),
+                })
+                .slot(
+                    Slot::new(
+                        Text::new(
+                            "This text sits next to a swatch in a row, and it shrinks and wraps to fit whatever room is left.",
+                            16.0,
+                            WHITE,
+                        )
+                        .wrap(),
+                    )
+                    .shrink(1.0),
+                ),
         )
         .child(
             Flex::row()

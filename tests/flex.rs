@@ -1,11 +1,12 @@
 use meow::base::{Rect, Size};
-use meow::layout::{self, Align, Direction, Item, Spec};
+use meow::layout::{self, Align, Direction, Fixed, Item, Spec};
 
 fn item(width: f32, height: f32, grow: f32, align: Align) -> Item {
     Item {
         size: Size { width, height },
         padding: 0.0,
         grow,
+        shrink: 0.0,
         align,
     }
 }
@@ -105,4 +106,28 @@ fn column_grow_splits_remaining_height_by_weight() {
 
     assert_eq!(rects[0], Rect::new(0.0, 0.0, 50.0, 35.0));
     assert_eq!(rects[1], Rect::new(0.0, 35.0, 50.0, 65.0));
+}
+
+#[test]
+fn shrinkable_items_give_up_space_equally() {
+    let mut flexible = item(0.0, 0.0, 0.0, Align::Start);
+    flexible.shrink = 1.0;
+    let size = Size { width: 100.0, height: 50.0 };
+
+    let (_, rects) = layout::solve_measured(
+        spec(Direction::Row, 0.0, 0.0),
+        &[flexible, flexible],
+        Fixed {
+            width: Some(100.0),
+            height: Some(50.0),
+        },
+        size,
+        &mut |_, room| Size {
+            width: room.width.min(80.0),
+            height: 20.0,
+        },
+    );
+
+    assert_eq!(rects[0], Rect::new(0.0, 0.0, 50.0, 20.0));
+    assert_eq!(rects[1], Rect::new(50.0, 0.0, 50.0, 20.0));
 }

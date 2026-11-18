@@ -1,11 +1,12 @@
 use crate::base::{Event, Rect, Size, Widget};
-use crate::layout::{self, Align, Direction, Item, Spec};
+use crate::layout::{self, Align, Direction, Fixed, Item, Spec};
 use crate::render::Painter;
 
 pub struct Slot {
     widget: Box<dyn Widget>,
     padding: f32,
     grow: f32,
+    shrink: f32,
     align: Align,
 }
 
@@ -15,6 +16,7 @@ impl Slot {
             widget: Box::new(widget),
             padding: 0.0,
             grow: 0.0,
+            shrink: 0.0,
             align: Align::default(),
         }
     }
@@ -26,6 +28,11 @@ impl Slot {
 
     pub fn grow(mut self, grow: f32) -> Self {
         self.grow = grow;
+        self
+    }
+
+    pub fn shrink(mut self, shrink: f32) -> Self {
+        self.shrink = shrink;
         self
     }
 
@@ -79,31 +86,16 @@ impl Flex {
         }
     }
 
-    fn solve(&self, available: Option<Size>) -> (Size, Vec<Rect>) {
-        let unbounded = Size {
-            width: f32::INFINITY,
-            height: f32::INFINITY,
-        };
+    fn solve(&self, fixed: Fixed, limit: Size) -> (Size, Vec<Rect>) {
         let items: Vec<Item> = self
             .slots
             .iter()
-            .map(|slot| {
-                let room = match available {
-                    Some(size) => {
-                        let inset = 2.0 * (self.padding + slot.padding);
-                        Size {
-                            width: (size.width - inset).max(0.0),
-                            height: (size.height - inset).max(0.0),
-                        }
-                    }
-                    None => unbounded,
-                };
-                Item {
-                    size: slot.widget.measure(room),
-                    padding: slot.padding,
-                    grow: slot.grow,
-                    align: slot.align,
-                }
+            .map(|slot| Item {
+                size: Size::default(),
+                padding: slot.padding,
+                grow: slot.grow,
+                shrink: slot.shrink,
+                align: slot.align,
             })
             .collect();
 
@@ -112,17 +104,40 @@ impl Flex {
             gap: self.gap,
             padding: self.padding,
         };
-        layout::solve(spec, &items, available)
+        let slots = &self.slots;
+        layout::solve_measured(spec, &items, fixed, limit, &mut |index, room| {
+            slots[index].widget.measure(room)
+        })
+    }
+
+    fn solve_in(&self, bounds: Rect) -> (Size, Vec<Rect>) {
+        let fixed = Fixed {
+            width: Some(bounds.size.width),
+            height: Some(bounds.size.height),
+        };
+        self.solve(fixed, bounds.size)
     }
 }
 
 impl Widget for Flex {
-    fn measure(&self, _available: Size) -> Size {
-        self.solve(None).0
+    fn measure(&self, available: Size) -> Size {
+        let unbounded = Size {
+            width: f32::INFINITY,
+            height: f32::INFINITY,
+        };
+        let natural = self.solve(Fixed::default(), unbounded).0;
+        if natural.width <= available.width {
+            return natural;
+        }
+        let fixed = Fixed {
+            width: Some(available.width),
+            height: None,
+        };
+        self.solve(fixed, available).0
     }
 
     fn paint(&self, bounds: Rect, painter: &mut dyn Painter) {
-        let (_, rects) = self.solve(Some(bounds.size));
+        let (_, rects) = self.solve_in(bounds);
         for (slot, rect) in self.slots.iter().zip(rects) {
             let child = Rect::new(
                 bounds.origin.x + rect.origin.x,
@@ -135,7 +150,7 @@ impl Widget for Flex {
     }
 
     fn event(&mut self, bounds: Rect, event: &Event) -> bool {
-        let (_, rects) = self.solve(Some(bounds.size));
+        let (_, rects) = self.solve_in(bounds);
         let mut changed = false;
         for (slot, rect) in self.slots.iter_mut().zip(rects) {
             let child = Rect::new(

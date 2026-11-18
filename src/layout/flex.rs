@@ -22,6 +22,7 @@ pub struct Item {
     pub size: Size,
     pub padding: f32,
     pub grow: f32,
+    pub shrink: f32,
     pub align: Align,
 }
 
@@ -32,24 +33,56 @@ pub struct Spec {
     pub padding: f32,
 }
 
-pub fn solve(spec: Spec, items: &[Item], available: Option<Size>) -> (Size, Vec<Rect>) {
-    let mut tree: TaffyTree<()> = TaffyTree::new();
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Fixed {
+    pub width: Option<f32>,
+    pub height: Option<f32>,
+}
+
+const UNBOUNDED: Size = Size {
+    width: f32::INFINITY,
+    height: f32::INFINITY,
+};
+
+fn content_space(available: taffy::style::AvailableSpace) -> f32 {
+    match available {
+        taffy::style::AvailableSpace::Definite(value) => value,
+        taffy::style::AvailableSpace::MinContent => 0.0,
+        taffy::style::AvailableSpace::MaxContent => f32::INFINITY,
+    }
+}
+
+fn offered(limit: f32) -> taffy::style::AvailableSpace {
+    if limit.is_finite() {
+        taffy::style::AvailableSpace::Definite(limit)
+    } else {
+        taffy::style::AvailableSpace::MaxContent
+    }
+}
+
+pub fn solve(spec: Spec, items: &[Item], fixed: Option<Size>) -> (Size, Vec<Rect>) {
+    let limit = fixed.unwrap_or(UNBOUNDED);
+    let fixed = Fixed {
+        width: fixed.map(|size| size.width),
+        height: fixed.map(|size| size.height),
+    };
+    solve_measured(spec, items, fixed, limit, &mut |index, _| items[index].size)
+}
+
+pub fn solve_measured(
+    spec: Spec,
+    items: &[Item],
+    fixed: Fixed,
+    limit: Size,
+    measure: &mut dyn FnMut(usize, Size) -> Size,
+) -> (Size, Vec<Rect>) {
+    let mut tree: TaffyTree<usize> = TaffyTree::new();
     let row = spec.direction == Direction::Row;
 
     let children: Vec<NodeId> = items
         .iter()
-        .map(|item| {
-            let stretch = item.align == Align::Stretch;
-            let (width, height) = match (stretch, row) {
-                (true, true) => (length(item.size.width), auto()),
-                (true, false) => (auto(), length(item.size.height)),
-                _ => (length(item.size.width), length(item.size.height)),
-            };
-            let (min_width, min_height) = match (stretch, row) {
-                (true, true) => (auto(), length(item.size.height)),
-                (true, false) => (length(item.size.width), auto()),
-                _ => (auto(), auto()),
-            };
+        .enumerate()
+        .map(|(index, item)| {
             let align_self = match item.align {
                 Align::Start => AlignItems::FlexStart,
                 Align::Center => AlignItems::Center,
@@ -57,35 +90,33 @@ pub fn solve(spec: Spec, items: &[Item], available: Option<Size>) -> (Size, Vec<
                 Align::Stretch => AlignItems::Stretch,
             };
 
-            tree.new_leaf(Style {
-                size: taffy::Size { width, height },
-                min_size: taffy::Size {
-                    width: min_width,
-                    height: min_height,
+            tree.new_leaf_with_context(
+                Style {
+                    margin: taffy::Rect {
+                        left: length(item.padding),
+                        right: length(item.padding),
+                        top: length(item.padding),
+                        bottom: length(item.padding),
+                    },
+                    flex_grow: item.grow,
+                    flex_shrink: item.shrink,
+                    align_self: Some(align_self),
+                    ..Default::default()
                 },
-                margin: taffy::Rect {
-                    left: length(item.padding),
-                    right: length(item.padding),
-                    top: length(item.padding),
-                    bottom: length(item.padding),
-                },
-                flex_grow: item.grow,
-                flex_shrink: 0.0,
-                align_self: Some(align_self),
-                ..Default::default()
-            })
+                index,
+            )
             .expect("taffy leaf")
         })
         .collect();
 
-    let root_size = match available {
-        Some(size) => taffy::Size {
-            width: length(size.width),
-            height: length(size.height),
+    let root_size = taffy::Size {
+        width: match fixed.width {
+            Some(width) => length(width),
+            None => auto(),
         },
-        None => taffy::Size {
-            width: auto(),
-            height: auto(),
+        height: match fixed.height {
+            Some(height) => length(height),
+            None => auto(),
         },
     };
 
@@ -114,8 +145,31 @@ pub fn solve(spec: Spec, items: &[Item], available: Option<Size>) -> (Size, Vec<
         )
         .expect("taffy root");
 
-    tree.compute_layout(root, taffy::Size::MAX_CONTENT)
-        .expect("taffy layout");
+    tree.compute_layout_with_measure(
+        root,
+        taffy::Size {
+            width: offered(limit.width),
+            height: offered(limit.height),
+        },
+        |known, space, _node, context, _style| {
+            let Some(index) = context else {
+                return taffy::Size {
+                    width: 0.0,
+                    height: 0.0,
+                };
+            };
+            let room = Size {
+                width: known.width.unwrap_or_else(|| content_space(space.width)),
+                height: known.height.unwrap_or_else(|| content_space(space.height)),
+            };
+            let size = measure(*index, room);
+            taffy::Size {
+                width: known.width.unwrap_or(size.width),
+                height: known.height.unwrap_or(size.height),
+            }
+        },
+    )
+    .expect("taffy layout");
 
     let root_layout = tree.layout(root).expect("taffy root layout");
     let size = Size {
