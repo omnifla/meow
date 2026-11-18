@@ -1,3 +1,4 @@
+use super::Text;
 use crate::base::{Event, Rect, Size, Widget};
 use crate::render::Painter;
 use crate::style::Color;
@@ -20,6 +21,7 @@ pub struct Button {
     size: Size,
     style: ButtonStyle,
     state: State,
+    label: Option<Text>,
     on_click: Option<Box<dyn FnMut()>>,
 }
 
@@ -29,13 +31,19 @@ impl Button {
             size,
             style,
             state: State::Normal,
+            label: None,
             on_click: None,
         }
     }
 
+    pub fn label(mut self, label: Text) -> Self {
+        self.label = Some(label);
+        self
+    }
+
     pub fn on_click(mut self, handler: impl FnMut() + 'static) -> Self {
-       self.on_click = Some(Box::new(handler));
-       self 
+        self.on_click = Some(Box::new(handler));
+        self
     }
 
     fn set_state(&mut self, state: State) -> bool {
@@ -57,6 +65,19 @@ impl Widget for Button {
             State::Pressed => self.style.pressed,
         };
         painter.fill_rect(bounds, color);
+
+        if let Some(label) = &self.label {
+            let size = label.measure(bounds.size);
+            label.paint(
+                Rect::new(
+                    bounds.origin.x + (bounds.size.width - size.width) / 2.0,
+                    bounds.origin.y + (bounds.size.height - size.height) / 2.0,
+                    size.width,
+                    size.height,
+                ),
+                painter,
+            );
+        }
     }
 
     fn event(&mut self, bounds: Rect, event: &Event) -> bool {

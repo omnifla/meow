@@ -9,16 +9,16 @@ license = "MIT"
 default = []
 wgpu = ["dep:wgpu"]
 winit = ["dep:winit"]
+desktop = ["wgpu", "winit", "dep:pollster"]
 a11y = []
 
 [dependencies]
+taffy = "0.10"
+cosmic-text = "0.16"
 wgpu = { version = "30", optional = true }
 winit = { version = "0.30", optional = true }
-taffy = "0.10"
-
-[dev-dependencies]
-pollster = "0.4"
+pollster = { version = "0.4", optional = true }
 
 [[example]]
 name = "hello_window"
-required-features = ["wgpu", "winit"]
+required-features = ["desktop"]
