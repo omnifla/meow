@@ -1,11 +1,11 @@
 use std::sync::Arc;
 
-use meow::base::{Rect, Size, Widget};
+use meow::base::{Event, Point, Rect, Size, Widget};
 use meow::render::WgpuRenderer;
 use meow::style::Color;
-use meow::widgets::Panel;
+use meow::widgets::{Button, ButtonStyle, Flex, Panel, Slot};
 use winit::application::ApplicationHandler;
-use winit::event::WindowEvent;
+use winit::event::{ElementState, MouseButton, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::window::{Window, WindowId};
 
@@ -16,6 +16,42 @@ struct Gpu {
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
     renderer: WgpuRenderer,
+    ui: Flex,
+    pointer: Point,
+}
+
+fn build_ui() -> Flex {
+    let style = ButtonStyle {
+        normal: Color::rgba(0.35, 0.6, 1.0, 1.0),
+        hovered: Color::rgba(0.5, 0.72, 1.0, 1.0),
+        pressed: Color::rgba(0.2, 0.4, 0.8, 1.0),
+    };
+    let button = Button::new(Size { width: 80.0, height: 80.0 }, style)
+        .on_click(|| println!("clicked"));
+
+    Flex::column()
+        .padding(16.0)
+        .gap(12.0)
+        .child(Panel {
+            size: Size { width: 240.0, height: 60.0 },
+            color: Color::rgba(1.0, 0.45, 0.7, 1.0),
+        })
+        .child(
+            Flex::row()
+                .gap(12.0)
+                .child(button)
+                .slot(
+                    Slot::new(Panel {
+                        size: Size { width: 80.0, height: 80.0 },
+                        color: Color::rgba(0.4, 0.9, 0.5, 1.0),
+                    })
+                    .grow(1.0),
+                )
+                .child(Panel {
+                    size: Size { width: 80.0, height: 80.0 },
+                    color: Color::rgba(1.0, 0.85, 0.3, 1.0),
+                }),
+        )
 }
 
 impl Gpu {
@@ -58,6 +94,8 @@ impl Gpu {
             queue,
             config,
             renderer,
+            ui: build_ui(),
+            pointer: Point::default(),
         }
     }
 
@@ -66,6 +104,13 @@ impl Gpu {
         self.config.height = height.max(1);
         self.surface.configure(&self.device, &self.config);
         self.window.request_redraw();
+    }
+
+    fn handle(&mut self, event: Event) {
+        let bounds = Rect::new(0.0, 0.0, self.config.width as f32, self.config.height as f32);
+        if self.ui.event(bounds, &event) {
+            self.window.request_redraw();
+        }
     }
 
     fn draw(&mut self) {
@@ -90,11 +135,10 @@ impl Gpu {
             height: self.config.height as f32,
         });
 
-        let panel = Panel {
-            size: Size { width: 240.0, height: 120.0 },
-            color: Color::rgba(1.0, 0.45, 0.7, 1.0),
-        };
-        panel.paint(Rect::new(40.0, 40.0, 240.0, 120.0), &mut self.renderer);
+        self.ui.paint(
+            Rect::new(0.0, 0.0, self.config.width as f32, self.config.height as f32),
+            &mut self.renderer,
+        );
 
         self.renderer.render(
             &self.device,
@@ -132,6 +176,26 @@ impl ApplicationHandler for App {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::Resized(size) => gpu.resize(size.width, size.height),
             WindowEvent::RedrawRequested => gpu.draw(),
+            WindowEvent::CursorMoved { position, .. } => {
+                let pointer = Point {
+                    x: position.x as f32,
+                    y: position.y as f32,
+                };
+                gpu.pointer = pointer;
+                gpu.handle(Event::PointerMoved(pointer));
+            }
+            WindowEvent::CursorLeft { .. } => gpu.handle(Event::PointerLeft),
+            WindowEvent::MouseInput {
+                state,
+                button: MouseButton::Left,
+                ..
+            } => {
+                let pointer = gpu.pointer;
+                gpu.handle(match state {
+                    ElementState::Pressed => Event::PointerPressed(pointer),
+                    ElementState::Released => Event::PointerReleased(pointer),
+                });
+            }
             _ => {}
         }
     }

@@ -23,4 +23,10 @@ impl Rect {
             size: Size { width, height },
         }
     }
+    pub fn contains(&self, point: Point) -> bool {
+        point.x >= self.origin.x
+            && point.x < self.origin.x + self.size.width
+            && point.y >= self.origin.y
+            && point.y < self.origin.y + self.size.height
+    }
 }
