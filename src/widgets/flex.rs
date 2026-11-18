@@ -87,11 +87,23 @@ impl Flex {
         let items: Vec<Item> = self
             .slots
             .iter()
-            .map(|slot| Item {
-                size: slot.widget.measure(available.unwrap_or(unbounded)),
-                padding: slot.padding,
-                grow: slot.grow,
-                align: slot.align,
+            .map(|slot| {
+                let room = match available {
+                    Some(size) => {
+                        let inset = 2.0 * (self.padding + slot.padding);
+                        Size {
+                            width: (size.width - inset).max(0.0),
+                            height: (size.height - inset).max(0.0),
+                        }
+                    }
+                    None => unbounded,
+                };
+                Item {
+                    size: slot.widget.measure(room),
+                    padding: slot.padding,
+                    grow: slot.grow,
+                    align: slot.align,
+                }
             })
             .collect();
 

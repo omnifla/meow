@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 description = "Declarative, reactive UI framework for editors, apps and in-game UI"
 license = "MIT"
+repository = "https://github.com/omnifla/meow"
 
 [features]
 default = []

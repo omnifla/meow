@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::hash::{DefaultHasher, Hash, Hasher};
 
 use cosmic_text::{
@@ -52,6 +52,8 @@ pub struct Text {
     source: Option<Box<dyn Fn() -> String>>,
     color: Color,
     line_height: f32,
+    wrap: bool,
+    wrap_width: Cell<Option<f32>>,
 }
 
 impl Text {
@@ -71,6 +73,8 @@ impl Text {
             source: None,
             color,
             line_height,
+            wrap: false,
+            wrap_width: Cell::new(None),
         }
     }
 
@@ -78,6 +82,11 @@ impl Text {
         let mut text = Self::new(&source(), size, color);
         text.source = Some(Box::new(source));
         text
+    }
+
+    pub fn wrap(mut self) -> Self {
+        self.wrap = true;
+        self
     }
 
     fn sync(&self) {
@@ -94,11 +103,29 @@ impl Text {
         });
         *self.content.borrow_mut() = next;
     }
+
+    fn fit(&self, width: f32) {
+        if !self.wrap {
+            return;
+        }
+        let target = width.is_finite().then(|| width.max(1.0));
+        if self.wrap_width.get() == target {
+            return;
+        }
+        FONTS.with(|fonts| {
+            let mut fonts = fonts.borrow_mut();
+            let mut buffer = self.buffer.borrow_mut();
+            buffer.set_size(&mut fonts.system, target, None);
+            buffer.shape_until_scroll(&mut fonts.system, true);
+        });
+        self.wrap_width.set(target);
+    }
 }
 
 impl Widget for Text {
-    fn measure(&self, _available: Size) -> Size {
+    fn measure(&self, available: Size) -> Size {
         self.sync();
+        self.fit(available.width);
         let buffer = self.buffer.borrow();
         let mut width = 0.0f32;
         let mut lines = 0u32;
@@ -114,6 +141,7 @@ impl Widget for Text {
 
     fn paint(&self, bounds: Rect, painter: &mut dyn Painter) {
         self.sync();
+        self.fit(bounds.size.width);
         FONTS.with(|fonts| {
             let Fonts { system, cache } = &mut *fonts.borrow_mut();
             let buffer = self.buffer.borrow();
