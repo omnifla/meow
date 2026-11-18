@@ -1,9 +1,12 @@
 use std::cell::RefCell;
+use std::hash::{DefaultHasher, Hash, Hasher};
 
-use cosmic_text::{Attrs, Buffer, Color as TextColor, FontSystem, Metrics, Shaping, SwashCache};
+use cosmic_text::{
+    Attrs, Buffer, CacheKey, FontSystem, Metrics, Shaping, SwashCache, SwashContent,
+};
 
-use crate::base::{Rect, Size, Widget};
-use crate::render::Painter;
+use crate::base::{Point, Rect, Size, Widget};
+use crate::render::{GlyphImage, Painter};
 use crate::style::Color;
 
 struct Fonts {
@@ -18,13 +21,29 @@ thread_local! {
     });
 }
 
-fn to_byte(value: f32) -> u8 {
-    (value.clamp(0.0, 1.0) * 255.0).round() as u8
-}
-
 fn shape(buffer: &mut Buffer, system: &mut FontSystem, content: &str) {
     buffer.set_text(system, content, &Attrs::new(), Shaping::Advanced, None);
     buffer.shape_until_scroll(system, true);
+}
+
+fn glyph_key(key: CacheKey) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    key.hash(&mut hasher);
+    hasher.finish()
+}
+
+fn rasterize(system: &mut FontSystem, cache: &mut SwashCache, key: CacheKey) -> Option<GlyphImage> {
+    let image = cache.get_image_uncached(system, key)?;
+    if !matches!(image.content, SwashContent::Mask) {
+        return None;
+    }
+    Some(GlyphImage {
+        width: image.placement.width,
+        height: image.placement.height,
+        left: image.placement.left,
+        top: image.placement.top,
+        coverage: image.data,
+    })
 }
 
 pub struct Text {
@@ -95,36 +114,25 @@ impl Widget for Text {
 
     fn paint(&self, bounds: Rect, painter: &mut dyn Painter) {
         self.sync();
-        let base = TextColor::rgba(
-            to_byte(self.color.r),
-            to_byte(self.color.g),
-            to_byte(self.color.b),
-            to_byte(self.color.a),
-        );
-
         FONTS.with(|fonts| {
             let Fonts { system, cache } = &mut *fonts.borrow_mut();
-            self.buffer
-                .borrow()
-                .draw(system, cache, base, |x, y, w, h, color| {
-                    if color.a() == 0 {
-                        return;
-                    }
-                    painter.fill_rect(
-                        Rect::new(
-                            bounds.origin.x + x as f32,
-                            bounds.origin.y + y as f32,
-                            w as f32,
-                            h as f32,
-                        ),
-                        Color::rgba(
-                            color.r() as f32 / 255.0,
-                            color.g() as f32 / 255.0,
-                            color.b() as f32 / 255.0,
-                            color.a() as f32 / 255.0,
-                        ),
+            let buffer = self.buffer.borrow();
+            for run in buffer.layout_runs() {
+                let line_y = run.line_y.round();
+                for glyph in run.glyphs.iter() {
+                    let physical = glyph.physical((0.0, 0.0), 1.0);
+                    let origin = Point {
+                        x: bounds.origin.x + physical.x as f32,
+                        y: bounds.origin.y + line_y + physical.y as f32,
+                    };
+                    painter.draw_glyph(
+                        glyph_key(physical.cache_key),
+                        origin,
+                        self.color,
+                        &mut || rasterize(system, cache, physical.cache_key),
                     );
-                });
+                }
+            }
         });
     }
 }
