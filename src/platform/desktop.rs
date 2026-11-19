@@ -1,16 +1,22 @@
 use std::sync::Arc;
+use std::time::Instant;
 
 use winit::application::ApplicationHandler;
-use winit::event::{ElementState, MouseButton, WindowEvent};
-use winit::event_loop::{ActiveEventLoop, EventLoop};
+use winit::event::{
+    ElementState, KeyEvent, MouseButton, MouseScrollDelta, StartCause, WindowEvent,
+};
+use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
+use winit::keyboard::{Key as LogicalKey, ModifiersState, NamedKey};
 use winit::window::{Window, WindowId};
 
-use crate::base::{Event, Point, Rect, Widget};
+use crate::base::{Event, Key, Modifiers, Point, Rect, Widget};
+use crate::clipboard;
 use crate::reactive;
 use crate::render::WgpuRenderer;
 use crate::style::Color;
 
 const BACKGROUND: Color = Color::rgba(0.08, 0.08, 0.1, 1.0);
+const LINE_PIXELS: f32 = 40.0;
 
 struct Gpu {
     window: Arc<Window>,
@@ -22,6 +28,9 @@ struct Gpu {
     renderer: WgpuRenderer,
     ui: Box<dyn Widget>,
     pointer: Point,
+    modifiers: ModifiersState,
+    wake: Option<Instant>,
+    board: Option<arboard::Clipboard>,
 }
 
 impl Gpu {
@@ -66,6 +75,9 @@ impl Gpu {
             renderer,
             ui,
             pointer: Point::default(),
+            modifiers: ModifiersState::default(),
+            wake: None,
+            board: arboard::Clipboard::new().ok(),
         }
     }
 
@@ -96,9 +108,52 @@ impl Gpu {
     fn handle(&mut self, event: Event) {
         let bounds = self.bounds();
         let changed = self.ui.event(bounds, &event);
+        if let Some(text) = clipboard::take_write() {
+            if let Some(board) = self.board.as_mut() {
+                let _ = board.set_text(text);
+            }
+        }
         let dirty = reactive::take_dirty();
         if changed || dirty {
             self.window.request_redraw();
+        }
+    }
+
+    fn key(&mut self, event: &KeyEvent) {
+        if event.state != ElementState::Pressed {
+            return;
+        }
+        let command = (self.modifiers.control_key() && !self.modifiers.alt_key())
+            || self.modifiers.super_key();
+        if command {
+            if let LogicalKey::Character(text) = &event.logical_key {
+                match text.to_lowercase().as_str() {
+                    "a" => self.handle(Event::SelectAll),
+                    "c" => self.handle(Event::Copy),
+                    "x" => self.handle(Event::Cut),
+                    "v" => {
+                        let pasted = self.board.as_mut().and_then(|board| board.get_text().ok());
+                        if let Some(text) = pasted {
+                            self.handle(Event::Paste(text));
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            return;
+        }
+        if let Some(key) = map_key(&event.logical_key) {
+            let modifiers = Modifiers {
+                shift: self.modifiers.shift_key(),
+                ctrl: self.modifiers.control_key(),
+                alt: self.modifiers.alt_key(),
+            };
+            self.handle(Event::KeyPressed(key, modifiers));
+        }
+        if let Some(text) = &event.text {
+            for ch in text.chars().filter(|ch| !ch.is_control()) {
+                self.handle(Event::Char(ch));
+            }
         }
     }
 
@@ -124,10 +179,11 @@ impl Gpu {
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-
+        let _ = reactive::take_wake();
         let bounds = self.bounds();
         self.renderer.begin(bounds.size);
         self.ui.paint(bounds, &mut self.renderer);
+        self.wake = reactive::take_wake().map(|after| Instant::now() + after);
         self.renderer
             .render(&self.device, &self.queue, &mut encoder, &view, BACKGROUND);
 
@@ -153,6 +209,23 @@ impl ApplicationHandler for App {
             gpu.window.request_redraw();
             self.gpu = Some(gpu);
         }
+    }
+
+    fn new_events(&mut self, _event_loop: &ActiveEventLoop, cause: StartCause) {
+        if let StartCause::ResumeTimeReached { .. } = cause {
+            if let Some(gpu) = self.gpu.as_mut() {
+                gpu.wake = None;
+                gpu.window.request_redraw();
+            }
+        }
+    }
+
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        let flow = match self.gpu.as_ref().and_then(|gpu| gpu.wake) {
+            Some(deadline) => ControlFlow::WaitUntil(deadline),
+            None => ControlFlow::Wait,
+        };
+        event_loop.set_control_flow(flow);
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
@@ -184,8 +257,32 @@ impl ApplicationHandler for App {
                     ElementState::Released => Event::PointerReleased(pointer),
                 });
             }
+            WindowEvent::ModifiersChanged(modifiers) => gpu.modifiers = modifiers.state(),
+            WindowEvent::KeyboardInput { event, .. } => gpu.key(&event),
+            WindowEvent::MouseWheel { delta, .. } => {
+                let pixels = match delta {
+                    MouseScrollDelta::LineDelta(_, y) => -y * LINE_PIXELS,
+                    MouseScrollDelta::PixelDelta(position) => -position.y as f32,
+                };
+                let pointer = gpu.pointer;
+                gpu.handle(Event::Scroll(pointer, pixels));
+            }
             _ => {}
         }
+    }
+}
+
+fn map_key(key: &LogicalKey) -> Option<Key> {
+    match key {
+        LogicalKey::Named(NamedKey::Backspace) => Some(Key::Backspace),
+        LogicalKey::Named(NamedKey::Delete) => Some(Key::Delete),
+        LogicalKey::Named(NamedKey::ArrowLeft) => Some(Key::Left),
+        LogicalKey::Named(NamedKey::ArrowRight) => Some(Key::Right),
+        LogicalKey::Named(NamedKey::Home) => Some(Key::Home),
+        LogicalKey::Named(NamedKey::End) => Some(Key::End),
+        LogicalKey::Named(NamedKey::Enter) => Some(Key::Enter),
+        LogicalKey::Named(NamedKey::Escape) => Some(Key::Escape),
+        _ => None,
     }
 }
 

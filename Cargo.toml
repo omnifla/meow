@@ -10,7 +10,7 @@ repository = "https://github.com/omnifla/meow"
 default = []
 wgpu = ["dep:wgpu"]
 winit = ["dep:winit"]
-desktop = ["wgpu", "winit", "dep:pollster"]
+desktop = ["wgpu", "winit", "dep:pollster", "dep:arboard"]
 a11y = []
 
 [dependencies]
@@ -19,6 +19,7 @@ cosmic-text = "0.16"
 wgpu = { version = "30", optional = true }
 winit = { version = "0.30", optional = true }
 pollster = { version = "0.4", optional = true }
+arboard = { version = "3", default-features = false, optional = true }
 
 [[example]]
 name = "hello_window"

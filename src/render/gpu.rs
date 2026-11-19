@@ -75,6 +75,7 @@ pub struct WgpuRenderer {
     packer: Packer,
     glyphs: HashMap<u64, Option<Slot>>,
     uploads: Vec<Upload>,
+    clips: Vec<Rect>,
 }
 
 impl WgpuRenderer {
@@ -193,6 +194,7 @@ impl WgpuRenderer {
             viewport: Size::default(),
             packer: Packer::new(),
             glyphs: HashMap::new(),
+            clips: Vec::new(),
             uploads: vec![Upload {
                 x: 0,
                 y: 0,
@@ -204,8 +206,42 @@ impl WgpuRenderer {
     }
 
     pub fn begin(&mut self, viewport: Size) {
+        self.clips.clear();
         self.vertices.clear();
         self.viewport = viewport;
+    }
+
+    fn intersect(a: Rect, b: Rect) -> Rect {
+        let left = a.origin.x.max(b.origin.x);
+        let top = a.origin.y.max(b.origin.y);
+        let right = (a.origin.x + a.size.width).min(b.origin.x + b.size.width);
+        let bottom = (a.origin.y + a.size.height).min(b.origin.y + b.size.height);
+        Rect::new(left, top, (right - left).max(0.0), (bottom - top).max(0.0))
+    }
+
+    fn clip_quad(rect: Rect, uv: [f32; 4], clip: Rect) -> Option<(Rect, [f32; 4])> {
+        let visible = Self::intersect(rect, clip);
+        if visible.size.width <= 0.0
+            || visible.size.height <= 0.0
+            || rect.size.width <= 0.0
+            || rect.size.height <= 0.0
+        {
+            return None;
+        }
+        let [u0, v0, u1, v1] = uv;
+        let u = |x: f32| u0 + (u1 - u0) * (x - rect.origin.x) / rect.size.width;
+        let v = |y: f32| v0 + (v1 - v0) * (y - rect.origin.y) / rect.size.height;
+        let right = visible.origin.x + visible.size.width;
+        let bottom = visible.origin.y + visible.size.height;
+        Some((
+            visible,
+            [
+                u(visible.origin.x),
+                v(visible.origin.y),
+                u(right),
+                v(bottom),
+            ],
+        ))
     }
 
     pub fn render(
@@ -318,6 +354,13 @@ impl WgpuRenderer {
     }
 
     fn push_quad(&mut self, rect: Rect, uv: [f32; 4], color: Color) {
+        let (rect, uv) = match self.clips.last() {
+            Some(&clip) => match Self::clip_quad(rect, uv, clip) {
+                Some(clipped) => clipped,
+                None => return,
+            },
+            None => (rect, uv),
+        };
         let Size { width, height } = self.viewport;
         let x0 = rect.origin.x / width * 2.0 - 1.0;
         let y0 = 1.0 - rect.origin.y / height * 2.0;
@@ -379,5 +422,17 @@ impl Painter for WgpuRenderer {
             (slot.y + slot.height) as f32 / size,
         ];
         self.push_quad(rect, uv, color);
+    }
+
+    fn push_clip(&mut self, rect: Rect) {
+        let next = match self.clips.last() {
+            Some(current) => Self::intersect(*current, rect),
+            None => rect,
+        };
+        self.clips.push(next);
+    }
+
+    fn pop_clip(&mut self) {
+        self.clips.pop();
     }
 }

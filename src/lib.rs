@@ -5,3 +5,4 @@ pub mod reactive;
 pub mod render;
 pub mod style;
 pub mod widgets;
+pub mod clipboard;

@@ -26,4 +26,8 @@ pub trait Painter {
         _image: &mut dyn FnMut() -> Option<GlyphImage>,
     ) {
     }
+
+    fn push_clip(&mut self, _rect: Rect) {}
+
+    fn pop_clip(&mut self) {}
 }

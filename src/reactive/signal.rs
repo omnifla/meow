@@ -1,3 +1,4 @@
+use std::time::Duration;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
@@ -11,6 +12,24 @@ fn mark_dirty() {
 
 pub fn take_dirty() -> bool {
     DIRTY.with(|dirty| dirty.replace(false))
+}
+
+thread_local! {
+    static WAKE: Cell<Option<Duration>> = const { Cell::new(None) };
+}
+
+pub fn request_wake(after: Duration) {
+    WAKE.with(|wake| {
+        let next = match wake.get() {
+            Some(current) => current.min(after),
+            None => after,
+        };
+        wake.set(Some(next));
+    });
+}
+
+pub fn take_wake() -> Option<Duration> {
+    WAKE.with(|wake| wake.take())
 }
 
 pub struct Signal<T> {

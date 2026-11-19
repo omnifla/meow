@@ -89,6 +89,31 @@ impl Text {
         self
     }
 
+    pub fn caret_x(&self, byte: usize) -> f32 {
+        self.sync();
+        let buffer = self.buffer.borrow();
+        let mut x = 0.0;
+        for run in buffer.layout_runs() {
+            for glyph in run.glyphs.iter() {
+                if glyph.start >= byte {
+                    return glyph.x;
+                }
+                x = glyph.x + glyph.w;
+            }
+        }
+        x
+    }
+
+    pub fn hit(&self, x: f32) -> usize {
+        self.sync();
+        let buffer = self.buffer.borrow();
+        let end = self.content.borrow().len();
+        buffer
+            .hit(x, self.line_height / 2.0)
+            .map(|cursor| cursor.index.min(end))
+            .unwrap_or(end)
+    }
+
     fn sync(&self) {
         let Some(source) = &self.source else {
             return;
